@@ -10,7 +10,7 @@ import { releases, toolEditors, tools, uploadTokens, type ReleaseRow, type ToolR
 import { ApiError } from "../lib/errors";
 import { dropTables, dumpTables, listToolTables } from "./dump";
 import { otherPrefixes } from "./prefixes";
-import { enqueueRelease, latestReleaseByTool, parsePayload, succeededReplaceReleases } from "./releases";
+import { currentToolFiles, enqueueRelease, latestReleaseByTool, parsePayload, previousSucceededReplace } from "./releases";
 import { deleteAllSecrets } from "./secrets";
 
 export interface ToolListItem extends ToolRow {
@@ -95,9 +95,17 @@ export async function createTool(input: CreateToolInput): Promise<ToolRow> {
 export async function stopTool(name: string, by: string): Promise<void> {
   const tool = await requireTool(name);
   if (tool.status !== "live") throw new ApiError(400, "停止できるのは公開中のツールだけです");
-  const snapshot = await getAdapters().source.readTool(name);
+  // 復元のために、停止時点のコードを payload に残す
+  const snapshot = await currentToolFiles(tool);
   const deleteAt = new Date(Date.now() + config.OKIBA_DELETE_GRACE_DAYS * 24 * 60 * 60 * 1000);
-  await enqueueRelease({ toolId: tool.id, op: "remove", reason: "stop", createdBy: by, payload: snapshot.files, baseSha: snapshot.baseSha });
+  await enqueueRelease({
+    toolId: tool.id,
+    op: "remove",
+    reason: "stop",
+    createdBy: by,
+    payload: snapshot.files,
+    baseVersion: snapshot.baseVersion,
+  });
   await platformDb().update(tools).set({ status: "stopped", deleteScheduledAt: deleteAt }).where(eq(tools.id, tool.id));
 }
 
@@ -142,14 +150,21 @@ export async function hardDeleteTool(name: string): Promise<void> {
   await platformDb().update(tools).set({ status: "deleted", deletedAt: new Date(), deleteScheduledAt: null }).where(eq(tools.id, tool.id));
 }
 
+/** 反映中のリリースの 1 つ前の内容を、新しいリリースとして積み直す。コードだけ戻り、マイグレーションは戻らない */
 export async function rollbackTool(name: string, by: string): Promise<void> {
-  if (config.OKIBA_MODE === "local") throw new ApiError(400, "ローカルモードでは戻せません");
   const tool = await requireTool(name);
   if (tool.status !== "live") throw new ApiError(400, "戻せるのは公開中のツールだけです");
-  const [, previous] = await succeededReplaceReleases(tool.id, 2);
-  if (!previous?.commitSha) throw new ApiError(400, "戻せるリリースがありません");
-  const files = await getAdapters().source.readToolAt(name, previous.commitSha);
-  await enqueueRelease({ toolId: tool.id, op: "replace", reason: "rollback", createdBy: by, payload: files, baseSha: previous.commitSha });
+  const previous = await previousSucceededReplace(tool);
+  const files = previous ? parsePayload(previous) : undefined;
+  if (!files) throw new ApiError(400, "戻せるリリースがありません");
+  await enqueueRelease({
+    toolId: tool.id,
+    op: "replace",
+    reason: "rollback",
+    createdBy: by,
+    payload: files,
+    baseVersion: String(previous!.id),
+  });
 }
 
 export async function addEditor(name: string, email: string): Promise<void> {

@@ -14,9 +14,10 @@ function createLocalAdapters(): Adapters {
   // eslint-disable-next-line @typescript-eslint/no-require-imports
   const local = require("./local") as typeof import("./local");
   return {
-    source: new local.LocalSourceStore(),
+    bundles: new local.NoopBundleStore(),
     builder: new local.NoopBuilder(),
     deployer: new local.NoopDeployer(),
+    toolFiles: new local.LocalToolFiles(),
     secrets: new local.LocalSecretStore(),
     dumps: new local.LocalDumpStore(),
     logs: new local.LocalLogReader(),
@@ -26,17 +27,15 @@ function createLocalAdapters(): Adapters {
 function createAwsAdapters(): Adapters {
   // eslint-disable-next-line @typescript-eslint/no-require-imports
   const aws = require("./aws") as typeof import("./aws");
-  // eslint-disable-next-line @typescript-eslint/no-require-imports
-  const github = require("./github-source") as typeof import("./github-source");
-  const source = new github.GithubSourceStore();
   return {
-    source,
-    builder: new aws.CodeBuildBuilder(source),
+    bundles: new aws.S3BundleStore(),
+    builder: new aws.CodeBuildBuilder(),
     deployer: new aws.LambdaDeployer(),
+    toolFiles: new aws.NoopToolFiles(),
     secrets: new aws.SsmSecretStore(),
     dumps: new aws.S3DumpStore(),
     logs: new aws.CloudWatchLogReader(),
   };
 }
 
-export type { Adapters, Builder, Deployer, DumpStore, LogReader, ReleaseRef, SecretStore, SourceStore } from "./types";
+export type { Adapters, Builder, BundleStore, Deployer, DumpStore, LogReader, ReleaseRef, SecretStore, ToolFiles } from "./types";

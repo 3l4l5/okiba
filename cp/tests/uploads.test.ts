@@ -1,6 +1,24 @@
 import { describe, expect, it } from "vitest";
+import { ApiError } from "../src/lib/errors";
 import { pendingMigrationFiles } from "../src/services/migrations";
-import { validateToolUpload } from "../src/services/uploads";
+import { checkBaseVersion, validateToolUpload } from "../src/services/uploads";
+
+describe("checkBaseVersion", () => {
+  it("accepts the current version", () => {
+    expect(() => checkBaseVersion("12", "12")).not.toThrow();
+    expect(() => checkBaseVersion("0", " 0 ")).not.toThrow();
+  });
+  it("rejects a stale version with 409 and the current one", () => {
+    try {
+      checkBaseVersion("13", "12");
+      throw new Error("should have thrown");
+    } catch (err) {
+      expect(err).toBeInstanceOf(ApiError);
+      expect((err as ApiError).status).toBe(409);
+      expect((err as ApiError).details).toEqual({ currentVersion: "13" });
+    }
+  });
+});
 
 const page = { path: "page.tsx", content: "export default function Page(){return null}" };
 

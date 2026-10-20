@@ -1,4 +1,4 @@
-// aws モードのアダプタ。CodeBuild でビルド、Lambda にデプロイ、Parameter Store に認証情報、S3 にダンプ、CloudWatch Logs を読む。
+// aws モードのアダプタ。S3 にツールの zip、CodeBuild でビルド、Lambda にデプロイ、Parameter Store に認証情報、S3 にダンプ、CloudWatch Logs を読む。
 import { CloudWatchLogsClient, FilterLogEventsCommand, GetLogEventsCommand } from "@aws-sdk/client-cloudwatch-logs";
 import { BatchGetBuildsCommand, CodeBuildClient, StartBuildCommand } from "@aws-sdk/client-codebuild";
 import { GetFunctionConfigurationCommand, LambdaClient, UpdateFunctionCodeCommand } from "@aws-sdk/client-lambda";
@@ -11,42 +11,76 @@ import {
   SSMClient,
 } from "@aws-sdk/client-ssm";
 import { config, requireAws } from "../config";
-import type { BuildStatus, Builder, Deployer, DumpStore, LogReader, ReleaseRef, SecretStore, SourceStore } from "./types";
+import { imageTagFor } from "../services/bundle";
+import type {
+  BuildStatus,
+  Builder,
+  BundleStore,
+  Deployer,
+  DumpStore,
+  LogReader,
+  ReleaseRef,
+  SecretStore,
+  ToolFiles,
+} from "./types";
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+/** 全ツールの zip を S3 に置く。CodeBuild がセカンダリソースとして取る */
+export class S3BundleStore implements BundleStore {
+  private readonly s3: S3Client;
+  private readonly bucket: string;
+
+  constructor() {
+    const aws = requireAws(["AWS_REGION", "OKIBA_S3_BUCKET"]);
+    this.s3 = new S3Client({ region: aws.AWS_REGION });
+    this.bucket = aws.OKIBA_S3_BUCKET;
+  }
+
+  async put(releaseId: number, zip: Buffer): Promise<{ key: string }> {
+    const key = `bundles/${releaseId}.zip`;
+    await this.s3.send(new PutObjectCommand({ Bucket: this.bucket, Key: key, Body: zip, ContentType: "application/zip" }));
+    return { key };
+  }
+}
+
+/** aws ではツールのファイルはイメージに焼き込まれるので、実行環境に直接置くことはない */
+export class NoopToolFiles implements ToolFiles {
+  async write(): Promise<void> {}
+  async remove(): Promise<void> {}
+}
+
 export class CodeBuildBuilder implements Builder {
   private readonly codebuild: CodeBuildClient;
-  private readonly s3: S3Client;
   private readonly logs: CloudWatchLogsClient;
   private readonly bucket: string;
   private readonly project: string;
   private readonly ecrRepoUri: string;
 
-  constructor(private readonly source: SourceStore) {
+  constructor() {
     const aws = requireAws(["AWS_REGION", "OKIBA_S3_BUCKET", "OKIBA_CODEBUILD_PROJECT", "OKIBA_ECR_REPO_URI"]);
     this.codebuild = new CodeBuildClient({ region: aws.AWS_REGION });
-    this.s3 = new S3Client({ region: aws.AWS_REGION });
     this.logs = new CloudWatchLogsClient({ region: aws.AWS_REGION });
     this.bucket = aws.OKIBA_S3_BUCKET;
     this.project = aws.OKIBA_CODEBUILD_PROJECT;
     this.ecrRepoUri = aws.OKIBA_ECR_REPO_URI;
   }
 
-  async start(release: ReleaseRef, commitSha: string): Promise<{ buildId: string }> {
-    const zip = await this.source.downloadZip(commitSha);
-    const key = `sources/${release.id}.zip`;
-    await this.s3.send(new PutObjectCommand({ Bucket: this.bucket, Key: key, Body: zip, ContentType: "application/zip" }));
+  /**
+   * プライマリソースは CodeBuild プロジェクトに設定した基盤のリポジトリ(読み取り専用)。
+   * sourceVersion で基盤の ref を指定し、ツールの zip をセカンダリソース "tools" として渡す。
+   */
+  async start(release: ReleaseRef, bundleKey: string, appRef: string): Promise<{ buildId: string }> {
     const res = await this.codebuild.send(
       new StartBuildCommand({
         projectName: this.project,
-        sourceTypeOverride: "S3",
-        sourceLocationOverride: `${this.bucket}/${key}`,
+        sourceVersion: appRef,
+        secondarySourcesOverride: [{ type: "S3", location: `${this.bucket}/${bundleKey}`, sourceIdentifier: "tools" }],
         environmentVariablesOverride: [
           { name: "ECR_REPO_URI", value: this.ecrRepoUri, type: "PLAINTEXT" },
-          { name: "IMAGE_TAG", value: commitSha, type: "PLAINTEXT" },
+          { name: "IMAGE_TAG", value: imageTagFor(release.id, appRef), type: "PLAINTEXT" },
         ],
       }),
     );

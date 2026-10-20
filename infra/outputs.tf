@@ -26,6 +26,11 @@ output "codebuild_project" {
   value = aws_codebuild_project.app.name
 }
 
+output "github_connection_arn" {
+  description = "作成後にコンソールで 1 度 GitHub の認可を済ませる(PENDING → AVAILABLE)"
+  value       = aws_codeconnections_connection.github.arn
+}
+
 output "lambda_functions" {
   value = {
     cp     = aws_lambda_function.cp.function_name

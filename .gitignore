@@ -7,6 +7,8 @@ dist/
 .env.local
 .env.*.local
 .okiba/
+# ツールのコードは Git に入れない(正本は CP の台帳)。app/app/tools/ 直下の基盤ファイルだけ残す
+app/app/tools/*/
 .DS_Store
 coverage/
 infra/.terraform/

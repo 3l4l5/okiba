@@ -1,8 +1,11 @@
 import Link from "next/link";
-import { getCurrentUser } from "@/src/lib/auth";
+import { config } from "@/src/config";
+import { getCurrentUser, isAdmin } from "@/src/lib/auth";
 import { listTools } from "@/src/services/tools";
+import { rebuildAction } from "./actions";
 import { StatusBadge } from "./components/StatusBadge";
 import { formatDate } from "./components/format";
+import { ActionButton } from "./tools/[name]/ActionButton";
 
 export const dynamic = "force-dynamic";
 
@@ -19,6 +22,13 @@ export default async function HomePage() {
         <Link href="/tools/new" className="button primary">
           新しいツール
         </Link>
+        {isAdmin(user.email) && (
+          <ActionButton
+            label="再ビルド"
+            confirm={`すべてのツールを今の基盤(${config.appRef || "未設定"})で作り直します。よろしいですか?`}
+            action={rebuildAction}
+          />
+        )}
       </div>
       <table>
         <thead>

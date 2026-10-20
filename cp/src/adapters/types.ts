@@ -1,4 +1,5 @@
 // デプロイ先に依存する部分の境界。local は手元で全部動かすため、aws は本番用。
+// ツールのコードの正本は DB(releases.payload)なので、ここにソース管理はない。
 import type { UploadFile } from "@okiba/shared";
 import type { ReleaseOp } from "../db/schema";
 
@@ -12,27 +13,9 @@ export interface ReleaseRef {
   reason: string;
 }
 
-export interface ToolSnapshot {
-  files: UploadFile[];
-  /** ツールのディレクトリの内容を表す値。内容が変わらなければ変わらない。無ければ 'empty' */
-  baseSha: string;
-}
-
-export interface SourceStore {
-  /** main の現在の内容 */
-  readTool(name: string): Promise<ToolSnapshot>;
-  /** 指定のコミット時点の内容 */
-  readToolAt(name: string, commitSha: string): Promise<UploadFile[]>;
-  /** リリースの内容を main の先頭に乗せたコミット(とブランチ)を作る */
-  prepareRelease(release: ReleaseRef): Promise<{ commitSha: string; branch?: string }>;
-  /** ビルドが通ったら main を進める。main が先に進んでいたら乗せ直す */
-  promote(release: ReleaseRef, commitSha: string, branch?: string): Promise<void>;
-  /** ビルドに失敗したブランチを消す */
-  discard(branch?: string): Promise<void>;
-  /** main の先頭 */
-  headSha(): Promise<string>;
-  /** ビルドに渡す zip */
-  downloadZip(commitSha: string): Promise<Buffer>;
+/** ビルドに渡す「全ツールの zip」の置き場所 */
+export interface BundleStore {
+  put(releaseId: number, zip: Buffer): Promise<{ key: string }>;
 }
 
 export interface BuildStatus {
@@ -43,12 +26,22 @@ export interface BuildStatus {
 }
 
 export interface Builder {
-  start(release: ReleaseRef, commitSha: string): Promise<{ buildId: string }>;
+  /** 基盤のコード(appRef)にツールの zip(bundleKey)を重ねてイメージを作る */
+  start(release: ReleaseRef, bundleKey: string, appRef: string): Promise<{ buildId: string }>;
   status(buildId: string): Promise<BuildStatus>;
 }
 
 export interface Deployer {
   deploy(imageUri: string): Promise<void>;
+}
+
+/**
+ * ツールのファイルを実行環境に置く。local ではツールアプリのディレクトリに直接書くのがデプロイそのもの。
+ * aws ではイメージに焼き込まれるので何もしない。
+ */
+export interface ToolFiles {
+  write(toolName: string, files: UploadFile[]): Promise<void>;
+  remove(toolName: string): Promise<void>;
 }
 
 export interface SecretStore {
@@ -69,9 +62,10 @@ export interface LogReader {
 }
 
 export interface Adapters {
-  source: SourceStore;
+  bundles: BundleStore;
   builder: Builder;
   deployer: Deployer;
+  toolFiles: ToolFiles;
   secrets: SecretStore;
   dumps: DumpStore;
   logs: LogReader;

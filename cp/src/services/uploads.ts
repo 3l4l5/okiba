@@ -1,14 +1,13 @@
 // AI からのアップロード。検証して、リリースをキューに入れる。
 import { checkMigrationSql, toTablePrefix, validateUploadFiles, type UploadFile } from "@okiba/shared";
 import { z } from "zod";
-import { getAdapters } from "../adapters";
 import type { ToolRow } from "../db/schema";
 import { ApiError } from "../lib/errors";
 import { otherPrefixes } from "./prefixes";
-import { enqueueRelease } from "./releases";
+import { enqueueRelease, versionOf } from "./releases";
 
 export const uploadBodySchema = z.object({
-  baseSha: z.string().min(1),
+  baseVersion: z.string().min(1),
   files: z
     .array(
       z.object({
@@ -39,18 +38,29 @@ export function validateToolUpload(files: UploadFile[], toolName: string, otherT
   return errors;
 }
 
+/** 元にしたバージョンが今のものと違えば 409(純粋関数) */
+export function checkBaseVersion(currentVersion: string, baseVersion: string): void {
+  if (currentVersion !== baseVersion.trim()) {
+    throw new ApiError(409, "ツールの内容が先に更新されています。files を取り直してからやり直してください", {
+      currentVersion,
+    });
+  }
+}
+
 export async function handleUpload(tool: ToolRow, body: unknown, by: string): Promise<{ releaseId: number }> {
   if (tool.status !== "live") throw new ApiError(400, "公開中のツールにだけアップロードできます");
   const parsed = uploadBodySchema.parse(body);
   const errors = validateToolUpload(parsed.files, tool.name, await otherPrefixes(tool.name));
   if (errors.length > 0) throw new ApiError(400, "アップロードの検証に失敗しました", errors);
 
-  const current = await getAdapters().source.readTool(tool.name);
-  if (current.baseSha !== parsed.baseSha) {
-    throw new ApiError(409, "ツールの内容が先に更新されています。files を取り直してからやり直してください", {
-      currentBaseSha: current.baseSha,
-    });
-  }
-  const releaseId = await enqueueRelease({ toolId: tool.id, op: "replace", reason: "upload", createdBy: by, payload: parsed.files, baseSha: parsed.baseSha });
+  checkBaseVersion(versionOf(tool), parsed.baseVersion);
+  const releaseId = await enqueueRelease({
+    toolId: tool.id,
+    op: "replace",
+    reason: "upload",
+    createdBy: by,
+    payload: parsed.files,
+    baseVersion: parsed.baseVersion,
+  });
   return { releaseId };
 }

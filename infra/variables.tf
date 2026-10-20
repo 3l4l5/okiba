@@ -86,25 +86,17 @@ variable "db_instance_class" {
   default = "db.t4g.small"
 }
 
-# ---- GitHub ----
+# ---- GitHub(読み取り専用。CodeBuild が基盤のコードを取るためだけ) ----
 
-variable "github_app_id" {
-  type = string
-}
-
-variable "github_installation_id" {
-  type = string
-}
-
-variable "github_repo" {
-  description = "owner/name"
+variable "github_repo_url" {
+  description = "基盤(okiba)のリポジトリの HTTPS URL。例: https://github.com/3l4l5/okiba.git。プライベートでよい(CodeConnections 経由)"
   type        = string
 }
 
-variable "github_app_private_key_ssm_name" {
-  description = "GitHub App の秘密鍵(PEM)を置いた SSM SecureString の名前。Terraform の外で作る"
+variable "okiba_app_ref" {
+  description = "CodeBuild が取る基盤のコードの ref(ブランチ、タグ、コミット)。main のままなら基盤の更新は main のマージで反映される"
   type        = string
-  default     = "/okiba/platform/github-app-private-key"
+  default     = "main"
 }
 
 # ---- コンテナイメージ ----

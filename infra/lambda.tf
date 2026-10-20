@@ -80,41 +80,30 @@ resource "aws_cloudwatch_log_group" "worker" {
   retention_in_days = 30
 }
 
-# ---- GitHub App の秘密鍵(Terraform の外で SSM に置く) ----
-# 環境変数は合計 4KB までなので、鍵が大きい場合は CP 側で SSM から読む方式
-# (GITHUB_APP_PRIVATE_KEY_SSM_NAME)に切り替える。
-data "aws_ssm_parameter" "github_app_private_key" {
-  name            = var.github_app_private_key_ssm_name
-  with_decryption = true
-}
-
 # ---- 共通の環境変数 ----
+# CP は GitHub に書かない(ツールのコードは DB の payload と S3 の bundle)。
+# GITHUB_* の認証情報は不要で、基盤のコードの ref(OKIBA_APP_REF)だけ渡す。
 
 locals {
   cp_environment = {
-    OKIBA_MODE               = "aws"
-    OKIBA_AUTH_MODE          = "alb"
-    OKIBA_ALLOWED_DOMAIN     = var.allowed_domain
-    OKIBA_ADMINS             = join(",", var.admins)
-    OKIBA_CP_URL             = local.cp_url
-    OKIBA_TOOLS_URL          = local.tools_url
-    PLATFORM_DATABASE_URL    = local.platform_database_url
-    TOOLS_DATABASE_URL       = local.tools_database_url
-    OKIBA_SSM_PREFIX         = local.ssm_prefix
-    OKIBA_S3_BUCKET          = aws_s3_bucket.main.bucket
-    OKIBA_CODEBUILD_PROJECT  = aws_codebuild_project.app.name
-    OKIBA_ECR_REPO_URI       = aws_ecr_repository.app.repository_url
+    OKIBA_MODE                = "aws"
+    OKIBA_AUTH_MODE           = "alb"
+    OKIBA_ALLOWED_DOMAIN      = var.allowed_domain
+    OKIBA_ADMINS              = join(",", var.admins)
+    OKIBA_CP_URL              = local.cp_url
+    OKIBA_TOOLS_URL           = local.tools_url
+    PLATFORM_DATABASE_URL     = local.platform_database_url
+    TOOLS_DATABASE_URL        = local.tools_database_url
+    OKIBA_SSM_PREFIX          = local.ssm_prefix
+    OKIBA_S3_BUCKET           = aws_s3_bucket.main.bucket
+    OKIBA_CODEBUILD_PROJECT   = aws_codebuild_project.app.name
+    OKIBA_ECR_REPO_URI        = aws_ecr_repository.app.repository_url
     OKIBA_APP_LAMBDA_FUNCTION = "${var.project}-app"
-    OKIBA_APP_LOG_GROUP      = local.app_log_group
-    GITHUB_APP_ID            = var.github_app_id
-    GITHUB_INSTALLATION_ID   = var.github_installation_id
-    GITHUB_REPO              = var.github_repo
-    GITHUB_MAIN_BRANCH       = "main"
-    GITHUB_APP_PRIVATE_KEY   = data.aws_ssm_parameter.github_app_private_key.value
-    GITHUB_APP_PRIVATE_KEY_SSM_NAME = var.github_app_private_key_ssm_name
+    OKIBA_APP_LOG_GROUP       = local.app_log_group
+    OKIBA_APP_REF             = var.okiba_app_ref
     # Lambda Web Adapter
-    AWS_LWA_PORT             = "3000"
-    PORT                     = "3000"
+    AWS_LWA_PORT = "3000"
+    PORT         = "3000"
   }
 }
 

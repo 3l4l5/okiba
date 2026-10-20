@@ -1,13 +1,15 @@
-# CodeBuild 用。CP が S3 に置いた zip(GitHub の zipball)をソースにして、
-# ツールアプリのイメージをビルドし、ECR にコミット SHA のタグで push する。
+# CodeBuild 用。プライマリソースは基盤のリポジトリ(GitHub、読み取り専用。CP が sourceVersion で ref を指定する)。
+# セカンダリソース "tools" は CP が S3 に置いた全ツールの zip(app/app/tools/<name>/... だけが入っている)。
+# ツールを基盤の app/app/tools/ に重ねてからイメージをビルドし、ECR に IMAGE_TAG で push する。
 # 環境変数 ECR_REPO_URI と IMAGE_TAG は CP が StartBuild で渡す。
 version: 0.2
 
 phases:
   pre_build:
     commands:
-      # zipball は owner-repo-sha/ というディレクトリを 1 つ持つ
-      - cd "$(ls -d */ | head -n 1)"
+      # 基盤の app/app/tools/ には layout.tsx などの基盤ファイルがあるので消さず、ツールのディレクトリだけ重ねる
+      - cp -R "$CODEBUILD_SRC_DIR_tools/app/app/tools/." app/app/tools/
+      - ls app/app/tools
       - aws ecr get-login-password --region "$AWS_DEFAULT_REGION" | docker login --username AWS --password-stdin "${ECR_REPO_URI%%/*}"
   build:
     commands:

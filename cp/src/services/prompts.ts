@@ -22,7 +22,7 @@ export function buildPrompt(input: PromptInput): string {
   const api = `${input.cpUrl.replace(/\/$/, "")}/api/tools/${input.toolName}`;
   const url = `${input.toolsUrl.replace(/\/$/, "")}/tools/${input.toolName}`;
   const keys = input.secretKeys.length > 0 ? input.secretKeys.map((k) => `\`${k}\``).join(", ") : "(まだ登録されていません)";
-  const packer = `node -e 'const fs=require("fs"),p=require("path");const root=process.argv[1];const base=process.argv[2];const out=[];(function walk(d){for(const e of fs.readdirSync(d,{withFileTypes:true})){const f=p.join(d,e.name);if(e.isDirectory())walk(f);else out.push({path:p.relative(root,f).split(p.sep).join("/"),content:fs.readFileSync(f).toString("base64"),encoding:"base64"})}})(root);fs.writeFileSync("upload.json",JSON.stringify({baseSha:base,files:out}))' ./${input.toolName} <baseSha>`;
+  const packer = `node -e 'const fs=require("fs"),p=require("path");const root=process.argv[1];const base=process.argv[2];const out=[];(function walk(d){for(const e of fs.readdirSync(d,{withFileTypes:true})){const f=p.join(d,e.name);if(e.isDirectory())walk(f);else out.push({path:p.relative(root,f).split(p.sep).join("/"),content:fs.readFileSync(f).toString("base64"),encoding:"base64"})}})(root);fs.writeFileSync("upload.json",JSON.stringify({baseVersion:base,files:out}))' ./${input.toolName} <baseVersion>`;
 
   return `# okiba のツール「${input.toolName}」を実装する
 
@@ -36,7 +36,7 @@ export function buildPrompt(input: PromptInput): string {
 - テーブル名の接頭語: \`${prefix}\`
 
 ## 守ること
-1. 書いてよいのは、取得したファイル一式(ツールのディレクトリの中)だけです。\`page.tsx\` は必ず含めてください。
+1. 書いてよいのは、取得したファイル一式(ツールのディレクトリの中)だけです。\`page.tsx\` は必ず含めてください。アップロードはディレクトリ丸ごとの置き換えで、送らなかったファイルは消えます。以前のバージョンは管理画面から戻せます。
 2. 次のファイルはアップロードできません: package.json、lock ファイル、next.config.*、middleware.ts、Dockerfile、.env*、.github/、tsconfig.json。
 3. パッケージは追加できません。使えるのは react、next、drizzle-orm(\`@/lib/db\` 経由)、zod、\`@/lib/user\`、\`@/lib/secrets\`、\`@/lib/log\` です。UI は素の CSS で書きます(CSS Modules 可)。
 4. テーブル名は必ず \`${prefix}\` で始めます(例: \`${prefix}items\`)。他のツールのテーブルは読み書きしません。
@@ -50,15 +50,15 @@ export function buildPrompt(input: PromptInput): string {
 ## 作業の流れ
 Upload Token: \`${input.token}\`(有効期限: ${input.expiresAt.toISOString()}。期限が切れたら管理画面で再発行してもらってください)
 
-1. 現在のファイル一式を取得して、ローカルの \`./${input.toolName}/\` に展開します。応答の \`baseSha\` を控えます。
+1. 現在のファイル一式を取得して、ローカルの \`./${input.toolName}/\` に展開します。応答の \`baseVersion\` を控えます。
 \`\`\`
 curl -sS -H "Authorization: Bearer ${input.token}" ${api}/files
 \`\`\`
-   応答: \`{ "baseSha": "...", "files": [{ "path": "page.tsx", "content": "<base64>", "encoding": "base64" }], "secretKeys": [] }\`
+   応答: \`{ "baseVersion": "12", "files": [{ "path": "page.tsx", "content": "<base64>", "encoding": "base64" }], "secretKeys": [] }\`
 
 2. ファイルを編集します。
 
-3. 一式を upload.json にまとめます(baseSha は 1 で控えたもの):
+3. 一式を upload.json にまとめます(baseVersion は 1 で控えたもの):
 \`\`\`
 ${packer}
 \`\`\`

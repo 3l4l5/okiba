@@ -1,4 +1,4 @@
-// platform database の台帳。src/db/migrations/0001_platform.sql と同じ形を保つこと。
+// platform database の台帳。src/db/migrations/*.sql を全部当てた形と同じに保つこと。
 import {
   char,
   date,
@@ -32,6 +32,8 @@ export const tools = mysqlTable("tools", {
   description: text("description").notNull(),
   owner: varchar("owner", { length: 255 }).notNull(),
   status: mysqlEnum("status", TOOL_STATUSES).notNull().default("live"),
+  /** いま反映されているリリース。ツールのコードの正本はこのリリースの payload */
+  currentReleaseId: int("current_release_id"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow().onUpdateNow(),
   deleteScheduledAt: timestamp("delete_scheduled_at"),
@@ -54,10 +56,13 @@ export const releases = mysqlTable("releases", {
   op: mysqlEnum("op", RELEASE_OPS).notNull(),
   reason: varchar("reason", { length: 32 }).notNull(),
   status: mysqlEnum("status", RELEASE_STATUSES).notNull().default("queued"),
-  baseSha: varchar("base_sha", { length: 64 }),
-  commitSha: varchar("commit_sha", { length: 64 }),
-  branch: varchar("branch", { length: 128 }),
+  /** アップロードが元にしたバージョン(= 当時の current_release_id。無ければ "0") */
+  baseVersion: varchar("base_version", { length: 64 }),
   buildId: varchar("build_id", { length: 255 }),
+  /** ビルドに渡した全ツールの zip の置き場所 */
+  bundleKey: varchar("bundle_key", { length: 512 }),
+  /** 基盤のコードの git ref(イメージをどの基盤で作ったか) */
+  appRef: varchar("app_ref", { length: 128 }),
   imageUri: varchar("image_uri", { length: 512 }),
   payload: longtext("payload"),
   log: mediumtext("log"),

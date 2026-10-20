@@ -77,11 +77,20 @@ data "aws_iam_policy_document" "cp" {
     resources = [aws_kms_key.ssm.arn]
   }
 
-  # ソース zip、ダンプ、ビルドログ
+  # ツールの bundle(ビルド入力)とダンプ。GitHub への権限はどこにもない
   statement {
-    sid       = "Bucket"
-    actions   = ["s3:PutObject", "s3:GetObject", "s3:DeleteObject", "s3:ListBucket"]
-    resources = [aws_s3_bucket.main.arn, "${aws_s3_bucket.main.arn}/*"]
+    sid     = "BucketObjects"
+    actions = ["s3:PutObject", "s3:GetObject", "s3:DeleteObject"]
+    resources = [
+      "${aws_s3_bucket.main.arn}/bundles/*",
+      "${aws_s3_bucket.main.arn}/dumps/*",
+    ]
+  }
+
+  statement {
+    sid       = "BucketList"
+    actions   = ["s3:ListBucket"]
+    resources = [aws_s3_bucket.main.arn]
   }
 
   statement {

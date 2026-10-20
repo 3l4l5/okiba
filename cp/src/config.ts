@@ -19,12 +19,9 @@ const schema = z.object({
   OKIBA_TOKEN_TTL_HOURS: z.coerce.number().positive().default(24),
   OKIBA_DELETE_GRACE_DAYS: z.coerce.number().positive().default(30),
   OKIBA_SSM_PREFIX: z.string().default("/okiba"),
+  /** 基盤のコードの git ref。CodeBuild がこの ref を取ってツールを重ねる。aws モードでは必須 */
+  OKIBA_APP_REF: z.string().optional(),
   AWS_REGION: z.string().optional(),
-  GITHUB_APP_ID: z.string().optional(),
-  GITHUB_APP_PRIVATE_KEY: z.string().optional(),
-  GITHUB_INSTALLATION_ID: z.string().optional(),
-  GITHUB_REPO: z.string().optional(),
-  GITHUB_MAIN_BRANCH: z.string().default("main"),
   OKIBA_S3_BUCKET: z.string().optional(),
   OKIBA_CODEBUILD_PROJECT: z.string().optional(),
   OKIBA_ECR_REPO_URI: z.string().optional(),
@@ -50,14 +47,13 @@ export const config = {
     : path.join(repoRoot, ".okiba", "secrets.json"),
   localStateDir: path.join(repoRoot, ".okiba"),
   toolsDirInRepo: "app/app/tools",
+  /** ローカルモードでは基盤の ref は意味を持たないので "local" */
+  appRef: env.OKIBA_APP_REF ?? (env.OKIBA_MODE === "aws" ? "" : "local"),
 };
 
 export type AwsKey =
   | "AWS_REGION"
-  | "GITHUB_APP_ID"
-  | "GITHUB_APP_PRIVATE_KEY"
-  | "GITHUB_INSTALLATION_ID"
-  | "GITHUB_REPO"
+  | "OKIBA_APP_REF"
   | "OKIBA_S3_BUCKET"
   | "OKIBA_CODEBUILD_PROJECT"
   | "OKIBA_ECR_REPO_URI"

@@ -1,12 +1,25 @@
 // リリースの状態機械。1 回の tick で「進められるところまで進める」。
 // 直列: 同時に進めるリリースは 1 つ。Lambda(1 分ごと)でもローカルのループ(5 秒ごと)でも同じ関数を呼ぶ。
-import { and, desc, eq, inArray, lte, lt, ne } from "drizzle-orm";
+//
+//   queued → building(全ツールの zip を作ってビルド)→ migrating(SQL を適用)
+//          → deploying(イメージ更新。local ではファイルを書く)→ succeeded(current_release_id を進める)
+import { and, eq, inArray, lte, lt, ne } from "drizzle-orm";
 import { getAdapters, type ReleaseRef } from "../adapters";
 import { config } from "../config";
 import { platformDb } from "../db/platform";
 import { releases, tools, type ReleaseRow, type ToolRow } from "../db/schema";
+import { createBundleZip, mergeBundleTools } from "../services/bundle";
 import { applyToolMigrations } from "../services/migrations";
-import { activeRelease, hasPendingRelease, oldestQueued, parsePayload } from "../services/releases";
+import {
+  activeRelease,
+  currentToolFiles,
+  enqueueRebuild,
+  hasPendingRelease,
+  latestSucceededRelease,
+  liveToolFiles,
+  oldestQueued,
+  parsePayload,
+} from "../services/releases";
 import { hardDeleteTool } from "../services/tools";
 
 const TIMEOUT_MS = 15 * 60 * 1000;
@@ -56,67 +69,78 @@ async function timeoutStale(): Promise<number> {
   return result.affectedRows;
 }
 
+/** 反映が終わったら、どのリリースが現在かを台帳に書く */
+async function pointCurrent(release: ReleaseRow): Promise<void> {
+  if (release.toolId === null) return;
+  if (release.op === "replace") {
+    await platformDb().update(tools).set({ currentReleaseId: release.id }).where(eq(tools.id, release.toolId));
+  } else if (release.op === "remove") {
+    await platformDb().update(tools).set({ currentReleaseId: null }).where(eq(tools.id, release.toolId));
+  }
+}
+
 /** building 以降を進める。終わったら true、まだ待つなら false */
 async function advance(release: ReleaseRow): Promise<boolean> {
-  const { builder, source, deployer } = getAdapters();
+  const { builder, deployer, toolFiles } = getAdapters();
   const db = platformDb();
-  const ref = await toRef(release);
 
-  if (release.status === "building") {
-    const status = await builder.status(release.buildId ?? "");
-    if (status.state === "running") {
-      if (status.logUrl && !release.logUrl) await db.update(releases).set({ logUrl: status.logUrl }).where(eq(releases.id, release.id));
-      return false;
-    }
-    if (status.state === "failed") {
-      await markFailed(release.id, status.logTail || "ビルドに失敗しました", { logUrl: status.logUrl ?? null });
-      await source.discard(release.branch ?? undefined);
-      return true;
-    }
-    let promoted = false;
-    try {
-      await source.promote(ref, release.commitSha ?? "", release.branch ?? undefined);
-      promoted = true;
-      await db
-        .update(releases)
-        .set({ status: "migrating", imageUri: status.imageUri ?? null, logUrl: status.logUrl ?? null })
-        .where(eq(releases.id, release.id));
-
-      const dumpUrls: string[] = [];
-      if (release.op === "replace") {
-        const tool = await toolById(release.toolId);
-        if (!tool) throw new Error("ツールが見つかりません");
-        const result = await applyToolMigrations(tool, ref.files ?? [], release.id);
-        if (result.dumpUrl) dumpUrls.push(result.dumpUrl);
-      } else if (release.op === "reconcile") {
-        const liveTools = await db.select().from(tools).where(eq(tools.status, "live"));
-        for (const tool of liveTools) {
-          const files = await source.readToolAt(tool.name, release.commitSha ?? "");
-          const result = await applyToolMigrations(tool, files, release.id);
-          if (result.dumpUrl) dumpUrls.push(result.dumpUrl);
-        }
-      }
-
-      await db
-        .update(releases)
-        .set({ status: "deploying", dumpUrl: dumpUrls[0] ?? null })
-        .where(eq(releases.id, release.id));
-      await deployer.deploy(status.imageUri ?? "");
-      await db
-        .update(releases)
-        .set({ status: "succeeded", finishedAt: new Date(), log: null })
-        .where(eq(releases.id, release.id));
-      return true;
-    } catch (err) {
-      const message = (err as Error).message;
-      const note = promoted ? "(コードは main に取り込み済み。マイグレーションかデプロイで失敗)" : "";
-      await markFailed(release.id, `${message} ${note}`.trim());
-      if (!promoted) await source.discard(release.branch ?? undefined);
-      return true;
-    }
+  if (release.status !== "building") {
+    // migrating / deploying で止まっているものは再開できないので、タイムアウトに任せる
+    return false;
   }
-  // migrating / deploying で止まっているものは再開できないので、タイムアウトに任せる
-  return false;
+
+  const status = await builder.status(release.buildId ?? "");
+  if (status.state === "running") {
+    if (status.logUrl && !release.logUrl) await db.update(releases).set({ logUrl: status.logUrl }).where(eq(releases.id, release.id));
+    return false;
+  }
+  if (status.state === "failed") {
+    await markFailed(release.id, status.logTail || "ビルドに失敗しました", { logUrl: status.logUrl ?? null });
+    return true;
+  }
+
+  const ref = await toRef(release);
+  let stage = "migrating";
+  try {
+    await db
+      .update(releases)
+      .set({ status: "migrating", imageUri: status.imageUri ?? null, logUrl: status.logUrl ?? null })
+      .where(eq(releases.id, release.id));
+
+    const dumpUrls: string[] = [];
+    if (release.op === "replace") {
+      const tool = await toolById(release.toolId);
+      if (!tool) throw new Error("ツールが見つかりません");
+      const result = await applyToolMigrations(tool, ref.files ?? [], release.id);
+      if (result.dumpUrl) dumpUrls.push(result.dumpUrl);
+    } else if (release.op === "reconcile") {
+      const liveTools = await db.select().from(tools).where(eq(tools.status, "live"));
+      for (const tool of liveTools) {
+        const result = await applyToolMigrations(tool, (await currentToolFiles(tool)).files, release.id);
+        if (result.dumpUrl) dumpUrls.push(result.dumpUrl);
+      }
+    }
+
+    stage = "deploying";
+    await db
+      .update(releases)
+      .set({ status: "deploying", dumpUrl: dumpUrls[0] ?? null })
+      .where(eq(releases.id, release.id));
+    if (release.op === "replace" && ref.toolName) await toolFiles.write(ref.toolName, ref.files ?? []);
+    if (release.op === "remove" && ref.toolName) await toolFiles.remove(ref.toolName);
+    await deployer.deploy(status.imageUri ?? "");
+
+    await pointCurrent(release);
+    await db
+      .update(releases)
+      .set({ status: "succeeded", finishedAt: new Date(), log: null })
+      .where(eq(releases.id, release.id));
+    return true;
+  } catch (err) {
+    const note = stage === "deploying" ? "(マイグレーションは適用済み。デプロイで失敗)" : "(マイグレーションで失敗。適用済みのファイルは記録されています)";
+    await markFailed(release.id, `${(err as Error).message} ${note}`.trim());
+    return true;
+  }
 }
 
 async function startNext(): Promise<ReleaseRow | undefined> {
@@ -130,15 +154,15 @@ async function startNext(): Promise<ReleaseRow | undefined> {
     .where(and(eq(releases.id, next.id), eq(releases.status, "queued")));
   if (claim.affectedRows === 0) return undefined;
 
-  const { source, builder } = getAdapters();
+  const { bundles, builder } = getAdapters();
   try {
     const ref = await toRef(next);
-    const prepared = await source.prepareRelease(ref);
-    const { buildId } = await builder.start(ref, prepared.commitSha);
-    await db
-      .update(releases)
-      .set({ commitSha: prepared.commitSha, branch: prepared.branch ?? null, buildId })
-      .where(eq(releases.id, next.id));
+    const appRef = config.appRef;
+    if (!appRef) throw new Error("OKIBA_APP_REF が設定されていません");
+    const bundleTools = mergeBundleTools(await liveToolFiles(), ref);
+    const { key: bundleKey } = await bundles.put(next.id, createBundleZip(bundleTools));
+    const { buildId } = await builder.start(ref, bundleKey, appRef);
+    await db.update(releases).set({ bundleKey, appRef, buildId }).where(eq(releases.id, next.id));
     const [row] = await db.select().from(releases).where(eq(releases.id, next.id)).limit(1);
     return row;
   } catch (err) {
@@ -164,18 +188,14 @@ async function hardDeleteDue(): Promise<string[]> {
   return deleted;
 }
 
+/** 基盤の ref が変わっていたら、全ツールを今の基盤で作り直す */
 async function reconcileIfNeeded(): Promise<boolean> {
   if (config.OKIBA_MODE !== "aws") return false;
   if (await hasPendingRelease()) return false;
-  const head = await getAdapters().source.headSha();
-  const [latest] = await platformDb()
-    .select()
-    .from(releases)
-    .where(eq(releases.status, "succeeded"))
-    .orderBy(desc(releases.id))
-    .limit(1);
-  if (latest?.commitSha === head) return false;
-  await platformDb().insert(releases).values({ toolId: null, op: "reconcile", reason: "reconcile", createdBy: "okiba-worker" });
+  const latest = await latestSucceededRelease();
+  if (!latest) return false;
+  if (latest.appRef === config.appRef) return false;
+  await enqueueRebuild("okiba-worker");
   return true;
 }
 

@@ -83,6 +83,8 @@ export default async function ToolPage({ params }: { params: Promise<{ name: str
           <dd>
             <code>{tool.name.replace(/-/g, "_")}_</code>
           </dd>
+          <dt>現在のバージョン</dt>
+          <dd>{tool.currentReleaseId !== null ? `#${tool.currentReleaseId}` : <span className="muted">未反映</span>}</dd>
         </dl>
       </div>
 
@@ -93,9 +95,7 @@ export default async function ToolPage({ params }: { params: Promise<{ name: str
           {tool.status === "live" && (
             <>
               <ActionButton label="停止" confirm="停止すると URL が開けなくなります。データは残ります。よろしいですか?" action={stopToolAction.bind(null, tool.name)} />
-              {config.OKIBA_MODE !== "local" && (
-                <ActionButton label="前のリリースに戻す" confirm="コードだけが前のリリースに戻ります(マイグレーションは戻りません)。よろしいですか?" action={rollbackToolAction.bind(null, tool.name)} />
-              )}
+              <ActionButton label="前のリリースに戻す" confirm="コードだけが前のリリースに戻ります(マイグレーションは戻りません)。よろしいですか?" action={rollbackToolAction.bind(null, tool.name)} />
               <ActionButton
                 label={`削除(${config.OKIBA_DELETE_GRACE_DAYS} 日後に完全削除)`}
                 className="danger"
@@ -207,6 +207,7 @@ export default async function ToolPage({ params }: { params: Promise<{ name: str
               <td>
                 {formatDate(r.createdAt)}
                 {r.finishedAt && <div className="muted">完了 {formatDate(r.finishedAt)}</div>}
+                {r.appRef && <div className="muted">基盤 {r.appRef}</div>}
               </td>
               <td>
                 {r.log && (

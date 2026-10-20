@@ -6,7 +6,7 @@ const nextConfig: NextConfig = {
   transpilePackages: ["@okiba/shared"],
   // monorepo の standalone 出力に workspace の依存を含める
   outputFileTracingRoot: path.join(__dirname, ".."),
-  serverExternalPackages: ["mysql2", "@octokit/rest", "@octokit/auth-app"],
+  serverExternalPackages: ["mysql2"],
 };
 
 export default nextConfig;

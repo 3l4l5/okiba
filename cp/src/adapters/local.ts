@@ -1,85 +1,40 @@
-// local モード。GitHub も AWS も使わず、ツールアプリのディレクトリに直接書く。
-// ツールアプリの dev サーバーがファイルの変化を拾うので、アップロードがそのまま反映される。
+// local モード。AWS を使わず、ツールアプリのディレクトリに直接書く。
+// ツールアプリの dev サーバーがファイルの変化を拾うので、リリースがそのまま反映される。
 import fs from "node:fs/promises";
 import path from "node:path";
 import type { UploadFile } from "@okiba/shared";
 import { config } from "../config";
-import { hashFiles, pathExists, readDirAsFiles, writeFilesToDir } from "./files";
-import type {
-  Builder,
-  Deployer,
-  DumpStore,
-  LogReader,
-  ReleaseRef,
-  SecretStore,
-  SourceStore,
-  ToolSnapshot,
-} from "./types";
-
-function toolsRoot(): string {
-  return path.join(config.repoRoot, ...config.toolsDirInRepo.split("/"));
-}
+import { pathExists, writeFilesToDir } from "./files";
+import type { Builder, BundleStore, Deployer, DumpStore, LogReader, SecretStore, ToolFiles } from "./types";
 
 function toolDir(name: string): string {
-  return path.join(toolsRoot(), name);
+  return path.join(config.repoRoot, ...config.toolsDirInRepo.split("/"), name);
 }
 
 function trashDir(name: string): string {
   return path.join(config.localStateDir, "trash", name);
 }
 
-export class LocalSourceStore implements SourceStore {
-  async readTool(name: string): Promise<ToolSnapshot> {
-    const files = await readDirAsFiles(toolDir(name));
-    return { files, baseSha: hashFiles(files) };
+/** ディレクトリを置き換える / 退避する。退避先は復元の正本ではなく(正本は DB)、手元で見返すためのもの */
+export class LocalToolFiles implements ToolFiles {
+  async write(toolName: string, files: UploadFile[]): Promise<void> {
+    await writeFilesToDir(toolDir(toolName), files);
   }
 
-  async readToolAt(name: string, commitSha: string): Promise<UploadFile[]> {
-    // 履歴は持たないので、停止時に退避したものだけ読める
-    const trash = trashDir(name);
-    if (await pathExists(trash)) return readDirAsFiles(trash);
-    throw new Error(`ローカルモードでは過去の内容(${commitSha})を取り出せません`);
+  async remove(toolName: string): Promise<void> {
+    const dir = toolDir(toolName);
+    if (!(await pathExists(dir))) return;
+    const trash = trashDir(toolName);
+    await fs.mkdir(path.dirname(trash), { recursive: true });
+    await fs.rm(trash, { recursive: true, force: true });
+    await fs.rename(dir, trash);
   }
+}
 
-  async prepareRelease(release: ReleaseRef): Promise<{ commitSha: string }> {
-    if (release.op === "reconcile") return { commitSha: await this.headSha() };
-    if (!release.toolName) throw new Error("toolName がありません");
-    if (release.op === "remove") {
-      const dir = toolDir(release.toolName);
-      if (await pathExists(dir)) {
-        const trash = trashDir(release.toolName);
-        await fs.mkdir(path.dirname(trash), { recursive: true });
-        await fs.rm(trash, { recursive: true, force: true });
-        await fs.rename(dir, trash);
-      }
-      return { commitSha: `removed-${release.id}` };
-    }
-    const files = release.files ?? [];
-    await writeFilesToDir(toolDir(release.toolName), files);
-    return { commitSha: hashFiles(files) };
-  }
-
-  async promote(): Promise<void> {}
-
-  async discard(): Promise<void> {}
-
-  async headSha(): Promise<string> {
-    const root = toolsRoot();
-    const all: UploadFile[] = [];
-    let names: string[] = [];
-    try {
-      names = (await fs.readdir(root, { withFileTypes: true })).filter((e) => e.isDirectory()).map((e) => e.name);
-    } catch {
-      return "empty";
-    }
-    for (const name of names.sort()) {
-      for (const f of await readDirAsFiles(path.join(root, name))) all.push({ ...f, path: `${name}/${f.path}` });
-    }
-    return hashFiles(all);
-  }
-
-  async downloadZip(): Promise<Buffer> {
-    throw new Error("ローカルモードではビルド用の zip を作れません");
+/** ローカルではビルドしないので zip は作らない */
+export class NoopBundleStore implements BundleStore {
+  async put(): Promise<{ key: string }> {
+    return { key: "local" };
   }
 }
 

@@ -20,6 +20,16 @@ okiba/
 - テーブル名は `<name>_`(ハイフンはアンダースコア)で始める。CP がマイグレーション SQL を検証する
 - ツールの認証情報は Parameter Store `/okiba/tools/<name>/<KEY>` に置き、ツールと一緒に消す
 
+## ソースコードの扱い
+
+ツールのコードは **Git には入れない**。正本は CP の台帳(`releases.payload` と `tools.current_release_id`)で、Git にあるのは基盤のコードだけ(`app/app/tools/` には layout / error / not-found しかない)。
+
+- AI は `files` で現在のコードと `baseVersion` を取り、ディレクトリ丸ごとを `uploads` に送る
+- CP は検証して `queued` のリリースを作る。ワーカーが拾い、live な全ツールのコードを zip(バンドル)にして S3 に置き、CodeBuild を起動する
+- CodeBuild は GitHub の基盤コード(読み取り専用、固定 ref)の上にバンドルを重ねてイメージを作る。成功したら `current_release_id` が進み、マイグレーション → Lambda 更新
+- CP は GitHub に書き込まない。基盤ファイルを変える経路は基盤担当の PR だけ
+- 基盤を更新したら、管理画面の「再ビルド」か 5 分ごとの調整ループが全ツールを再ビルドする
+
 ## ローカルで動かす
 
 ```bash
