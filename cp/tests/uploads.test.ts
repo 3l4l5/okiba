@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { ApiError } from "../src/lib/errors";
-import { pendingMigrationFiles } from "../src/services/migrations";
+import { checkAppliedMigrationsUnchanged, migrationChecksum, pendingMigrationFiles } from "../src/services/migrations";
 import { checkBaseVersion, validateToolUpload } from "../src/services/uploads";
 
 describe("checkBaseVersion", () => {
@@ -65,7 +65,31 @@ describe("pendingMigrationFiles", () => {
       { path: "migrations/0001_init.sql", content: "" },
       { path: "migrations/notes.txt", content: "" },
     ];
-    expect(pendingMigrationFiles(files, ["0001_init.sql"]).map((f) => f.path)).toEqual(["migrations/0002_add.sql"]);
+    const applied = [{ filename: "0001_init.sql", checksum: null }];
+    expect(pendingMigrationFiles(files, applied).map((f) => f.path)).toEqual(["migrations/0002_add.sql"]);
     expect(pendingMigrationFiles(files, []).map((f) => f.path)).toEqual(["migrations/0001_init.sql", "migrations/0002_add.sql"]);
+  });
+});
+
+describe("checkAppliedMigrationsUnchanged", () => {
+  const init = { path: "migrations/0001_init.sql", content: "CREATE TABLE a_x (id INT);" };
+  it("accepts unchanged and unknown-checksum files", () => {
+    const applied = [{ filename: "0001_init.sql", checksum: migrationChecksum(init) }];
+    expect(checkAppliedMigrationsUnchanged([init], applied)).toEqual([]);
+    expect(checkAppliedMigrationsUnchanged([init], [{ filename: "0001_init.sql", checksum: null }])).toEqual([]);
+    expect(checkAppliedMigrationsUnchanged([{ path: "migrations/0002_b.sql", content: "x" }], applied)).toEqual([]);
+  });
+  it("ignores line endings and trailing whitespace", () => {
+    const applied = [{ filename: "0001_init.sql", checksum: migrationChecksum(init) }];
+    const crlf = { path: init.path, content: init.content.replace(/\n/g, "\r\n") + "\n\n" };
+    expect(checkAppliedMigrationsUnchanged([crlf], applied)).toEqual([]);
+  });
+  it("rejects a rewritten applied migration", () => {
+    const applied = [{ filename: "0001_init.sql", checksum: migrationChecksum(init) }];
+    const rewritten = { path: init.path, content: "CREATE TABLE a_visits (id INT);" };
+    const errors = checkAppliedMigrationsUnchanged([rewritten], applied);
+    expect(errors).toHaveLength(1);
+    expect(errors[0]).toContain("0001_init.sql");
+    expect(errors[0]).toContain("新しい番号");
   });
 });

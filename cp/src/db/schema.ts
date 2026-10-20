@@ -80,6 +80,8 @@ export const migrations = mysqlTable(
     id: int("id").autoincrement().primaryKey(),
     toolId: int("tool_id").notNull(),
     filename: varchar("filename", { length: 255 }).notNull(),
+    // 内容の sha256。0003 より前に適用した行は NULL(チェックしない)
+    checksum: char("checksum", { length: 64 }),
     appliedAt: timestamp("applied_at").notNull().defaultNow(),
   },
   (t) => [uniqueIndex("uq_migrations").on(t.toolId, t.filename)],

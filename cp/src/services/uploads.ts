@@ -3,6 +3,7 @@ import { checkMigrationSql, toTablePrefix, validateUploadFiles, type UploadFile 
 import { z } from "zod";
 import type { ToolRow } from "../db/schema";
 import { ApiError } from "../lib/errors";
+import { appliedMigrations, checkAppliedMigrationsUnchanged } from "./migrations";
 import { otherPrefixes } from "./prefixes";
 import { enqueueRelease, versionOf } from "./releases";
 
@@ -50,7 +51,11 @@ export function checkBaseVersion(currentVersion: string, baseVersion: string): v
 export async function handleUpload(tool: ToolRow, body: unknown, by: string): Promise<{ releaseId: number }> {
   if (tool.status !== "live") throw new ApiError(400, "公開中のツールにだけアップロードできます");
   const parsed = uploadBodySchema.parse(body);
-  const errors = validateToolUpload(parsed.files, tool.name, await otherPrefixes(tool.name));
+  const errors = [
+    ...validateToolUpload(parsed.files, tool.name, await otherPrefixes(tool.name)),
+    // 適用済みのマイグレーションを書き換えたアップロードは、キューに入れる前に拒否する
+    ...checkAppliedMigrationsUnchanged(parsed.files, await appliedMigrations(tool.id)),
+  ];
   if (errors.length > 0) throw new ApiError(400, "アップロードの検証に失敗しました", errors);
 
   checkBaseVersion(versionOf(tool), parsed.baseVersion);

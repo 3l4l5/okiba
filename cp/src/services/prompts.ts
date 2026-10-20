@@ -40,7 +40,7 @@ export function buildPrompt(input: PromptInput): string {
 2. 次のファイルはアップロードできません: package.json、lock ファイル、next.config.*、middleware.ts、Dockerfile、.env*、.github/、tsconfig.json。
 3. パッケージは追加できません。使えるのは react、next、drizzle-orm(\`@/lib/db\` 経由)、zod、\`@/lib/user\`、\`@/lib/secrets\`、\`@/lib/log\` です。UI は素の CSS で書きます(CSS Modules 可)。
 4. テーブル名は必ず \`${prefix}\` で始めます(例: \`${prefix}items\`)。他のツールのテーブルは読み書きしません。
-5. スキーマの変更は \`migrations/NNNN_説明.sql\`(連番)に SQL で書きます。既存の migration ファイルは変更せず、新しいファイルを足します。\`drizzle-kit push\` は使いません。破壊的な変更(DROP、型変更)は避け、列の追加で済ませます。
+5. スキーマの変更は \`migrations/NNNN_説明.sql\`(連番)に SQL で書きます。**適用済みの migration ファイル(ひな形の \`0001_init.sql\` を含む)は書き換えません。** 書き換えるとアップロードが拒否されます。必要なテーブルは \`0002_説明.sql\` のように新しいファイルで作り、ひな形のテーブルが不要なら \`DROP TABLE\` も新しいファイルに書きます。\`drizzle-kit push\` は使いません。破壊的な変更(列の削除、型変更)は避け、列の追加で済ませます。
 6. ログイン画面や認証の仕組みは作りません。利用者は \`import { getCurrentUser } from "@/lib/user"\` で取れます(email と name)。
 7. 認証情報(API キーなど)はコードに書きません。管理画面で登録したものを \`import { getSecret } from "@/lib/secrets"\` で \`await getSecret("KEY")\` として取ります。登録済みのキー: ${keys}
 8. ログは \`import { log } from "@/lib/log"\` の \`log.info(...)\` / \`log.error(...)\` を使います。
