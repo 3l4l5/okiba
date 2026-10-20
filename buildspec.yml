@@ -1,0 +1,18 @@
+# CodeBuild 用。CP が S3 に置いた zip(GitHub の zipball)をソースにして、
+# ツールアプリのイメージをビルドし、ECR にコミット SHA のタグで push する。
+# 環境変数 ECR_REPO_URI と IMAGE_TAG は CP が StartBuild で渡す。
+version: 0.2
+
+phases:
+  pre_build:
+    commands:
+      # zipball は owner-repo-sha/ というディレクトリを 1 つ持つ
+      - cd "$(ls -d */ | head -n 1)"
+      - aws ecr get-login-password --region "$AWS_DEFAULT_REGION" | docker login --username AWS --password-stdin "${ECR_REPO_URI%%/*}"
+  build:
+    commands:
+      - docker build -f app/Dockerfile -t "$ECR_REPO_URI:$IMAGE_TAG" .
+  post_build:
+    commands:
+      - docker push "$ECR_REPO_URI:$IMAGE_TAG"
+      - echo "pushed $ECR_REPO_URI:$IMAGE_TAG"

@@ -1,0 +1,27 @@
+{
+  "name": "okiba",
+  "private": true,
+  "version": "0.1.0",
+  "description": "社内の業務ツールを AI で作って SSO の内側に置くための基盤",
+  "workspaces": [
+    "shared",
+    "cp",
+    "app"
+  ],
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "dev:cp": "npm run dev -w cp",
+    "dev:app": "npm run dev -w app",
+    "worker": "npm run worker -w cp",
+    "db:migrate": "npm run db:migrate -w cp",
+    "build": "npm run build -w shared && npm run build -w app && npm run build -w cp",
+    "typecheck": "npm run typecheck -w shared && npm run typecheck -w app && npm run typecheck -w cp",
+    "test": "vitest run"
+  },
+  "devDependencies": {
+    "typescript": "^5.6.0",
+    "vitest": "^3.0.0"
+  }
+}
