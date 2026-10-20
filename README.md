@@ -35,8 +35,8 @@ okiba/
 ```bash
 mise install            # node 24
 npm install
-docker compose up -d    # MySQL (3310)
-npm run db:migrate      # platform の台帳テーブル
+docker compose up -d --wait   # MySQL (3310)。初回はボリュームの初期化に数十秒かかる
+npm run db:migrate            # platform の台帳テーブル(MySQL の起動を最大 60 秒待つ)
 
 npm run dev:cp          # http://localhost:3000  管理画面
 npm run dev:app         # http://localhost:3001  ツールアプリ
